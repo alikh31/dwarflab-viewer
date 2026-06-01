@@ -29,11 +29,20 @@ jobs:
           node-version: 20
           cache: npm
 
+      # node-gyp (used to build the native @abandonware/noble module) needs
+      # Python's distutils, which was removed from the stdlib in Python 3.12.
+      # Pin 3.11 so the native build works on all runners.
+      - name: Set up Python 3.11 (for node-gyp)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       # Installs deps and runs the patch-package postinstall (jmuxer patch) and
-      # any native rebuild (noble). build_from_source stays off so noble uses
-      # its prebuilt binaries where available.
+      # the native noble rebuild. Use `npm install` (not `npm ci`) to work
+      # around npm's optional-dependency bug that can skip the platform-specific
+      # @rollup/rollup-* binary and break the Vite build.
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
         env:
           npm_config_build_from_source: "false"
 
