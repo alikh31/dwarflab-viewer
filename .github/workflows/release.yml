@@ -71,6 +71,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # electron-builder rebuilds the native BLE stack (noble → libusb) against
+      # Electron's headers when packaging. On Linux the libusb build needs the
+      # udev development headers, which aren't on the runner by default.
+      - name: Install Linux native build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
