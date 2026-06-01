@@ -68,7 +68,7 @@ jobs:
             cxxflags: ""
           - os: ubuntu-latest
             platform: linux
-            cxxflags: "-std=c++17"
+            cxxflags: "-std=c++20"
 
     steps:
       - name: Checkout
@@ -117,8 +117,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          # node-addon-api headers (pulled in by the `usb` dep of noble's Linux
-          # Bluetooth stack) require C++17 (std::string_view). The Ubuntu
-          # runner's g++ defaults to an older standard, so force C++17. Empty on
-          # macOS/Windows, whose default toolchains already build these modules.
+          # Electron 34's V8 headers require C++20 (std::ranges, contiguous_iterator)
+          # when rebuilding the native BLE modules (@abandonware/bluetooth-hci-socket,
+          # usb) on Linux. The Ubuntu runner's g++ defaults to an older standard, so
+          # force C++20. Empty on macOS/Windows, whose default toolchains already build.
           CXXFLAGS: ${{ matrix.cxxflags }}
