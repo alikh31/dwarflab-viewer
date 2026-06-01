@@ -1,0 +1,50 @@
+{
+  "name": "dwarflab-viewer",
+  "version": "0.1.0",
+  "description": "Unofficial desktop viewer for DWARFLAB DWARF telescopes (live view, focus, astro, motor control)",
+  "license": "MIT",
+  "author": "alikh31",
+  "homepage": "https://github.com/alikh31/dwarflab-viewer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alikh31/dwarflab-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alikh31/dwarflab-viewer/issues"
+  },
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-vite build && electron-builder",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@alikh/dwarflab-ble": "^0.1.1",
+    "@alikh/dwarflab-sdk": "^0.1.1",
+    "jmuxer": "^2.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.5.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^3.0.0",
+    "patch-package": "^8.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}

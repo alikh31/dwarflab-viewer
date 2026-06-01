@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+# (out/ = electron-vite build; build/ = electron-builder installers)
+out/
+build/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Note: patches/ IS tracked — patch-package applies it on install.

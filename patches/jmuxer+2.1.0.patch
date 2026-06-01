@@ -1,0 +1,29 @@
+diff --git a/node_modules/jmuxer/dist/jmuxer.min.js b/node_modules/jmuxer/dist/jmuxer.min.js
+index b15a391..c33e19d 100644
+--- a/node_modules/jmuxer/dist/jmuxer.min.js
++++ b/node_modules/jmuxer/dist/jmuxer.min.js
+@@ -2712,9 +2712,21 @@
+         this.mp4track.fps = config.fps || this.mp4track.fps;
+         this.mp4track.width = config.width;
+         this.mp4track.height = config.height;
+-        this.mp4track.codec = "hvc1.".concat(config.profile_idc, ".").concat(config.profile_compatibility_flags.toString(16)) + ".L".concat(config.level_idc).concat(config.tier_flag ? 'H' : 'L') + ".".concat(config.constraint_indicator_flags.map(function (b) {
+-          return b.toString(16);
+-        }).join('.').toUpperCase());
++        var pcf = config.profile_compatibility_flags;
++        pcf = ((pcf & 0x55555555) << 1) | ((pcf >>> 1) & 0x55555555);
++        pcf = ((pcf & 0x33333333) << 2) | ((pcf >>> 2) & 0x33333333);
++        pcf = ((pcf & 0x0F0F0F0F) << 4) | ((pcf >>> 4) & 0x0F0F0F0F);
++        pcf = ((pcf & 0x00FF00FF) << 8) | ((pcf >>> 8) & 0x00FF00FF);
++        pcf = (pcf << 16) | (pcf >>> 16);
++        pcf = pcf >>> 0;
++        var cif = config.constraint_indicator_flags;
++        var lastNonZero = 5;
++        while (lastNonZero >= 0 && cif[lastNonZero] === 0) lastNonZero--;
++        var cifStr = '';
++        for (var ci = 0; ci <= lastNonZero; ci++) {
++          cifStr += '.' + cif[ci].toString(16).toUpperCase();
++        }
++        this.mp4track.codec = "hvc1.".concat(config.profile_idc, ".").concat(pcf.toString(16).toUpperCase()) + ".".concat(config.tier_flag ? 'H' : 'L').concat(config.level_idc) + cifStr;
+         this.mp4track.hvcC = {
+           profile_space: config.profile_space,
+           tier_flag: config.tier_flag,

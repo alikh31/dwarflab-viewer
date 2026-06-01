@@ -1,0 +1,61 @@
+appId: io.github.alikh31.dwarflabviewer
+productName: DWARFLab Viewer (Unofficial)
+directories:
+  buildResources: resources
+  output: build
+
+# Files to include in the packaged app (the electron-vite build output).
+files:
+  - out/**
+  - package.json
+
+# Bundle the noble native module (BLE) as an unpacked asar dependency so its
+# prebuilt binaries load at runtime.
+asarUnpack:
+  - "**/node_modules/@abandonware/**"
+
+npmRebuild: true
+
+# Publish built installers to GitHub Releases (used by the release workflow).
+publish:
+  provider: github
+  owner: alikh31
+  repo: dwarflab-viewer
+
+mac:
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  # Unsigned for now: no Developer ID / notarization. Users bypass Gatekeeper
+  # via right-click → Open (documented in the README).
+  identity: null
+  extendInfo:
+    NSBluetoothAlwaysUsageDescription: "DWARFLab Viewer needs Bluetooth to discover and configure DWARF telescopes"
+    NSBluetoothPeripheralUsageDescription: "DWARFLab Viewer needs Bluetooth to discover and configure DWARF telescopes"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # Unsigned: users click "More info" → "Run anyway" on SmartScreen.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  category: Utility
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  # BLE on Linux needs `setcap cap_net_raw+eip` on the node binary (documented
+  # in the README); the app degrades gracefully if BLE is unavailable.
