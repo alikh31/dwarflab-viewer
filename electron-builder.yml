@@ -50,6 +50,9 @@ nsis:
 
 linux:
   category: Utility
+  # .deb requires a Debian-format maintainer "Name <email>". Use a GitHub
+  # noreply address so no personal email is published.
+  maintainer: "alikh31 <alikh31@users.noreply.github.com>"
   target:
     - target: AppImage
       arch:
