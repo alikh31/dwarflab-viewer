@@ -44,14 +44,43 @@ Download the installer for your platform from the
 | Windows | `...-Setup.exe` (NSIS) |
 | Linux | `.AppImage` or `.deb` |
 
-> **The binaries are currently unsigned.** Your OS will warn that the app is
-> from an unidentified developer. This is expected for an unsigned open-source
-> build — here's how to run it anyway:
->
-> - **macOS:** right-click (or Ctrl-click) the app → **Open** → **Open** again.
->   (Gatekeeper blocks double-click launch of unsigned apps, but allows this.)
-> - **Windows:** on the SmartScreen prompt, click **More info** → **Run anyway**.
-> - **Linux (AppImage):** `chmod +x DWARFLab-Viewer-*.AppImage` then run it.
+> **The binaries are currently unsigned.** Your OS will warn that the app
+> cannot be verified. This is expected for an unsigned open-source build (the
+> app isn't signed with a paid Apple/Windows certificate) — here's how to run it
+> anyway. Only do this for builds you trust.
+
+### macOS
+
+Drag **DWARFLab Viewer (Unofficial)** to your Applications folder, then open it.
+On modern macOS (Sonoma/Sequoia) you'll see *"Apple could not verify … is free
+of malware."* The old right‑click → Open shortcut no longer bypasses this, so
+use one of these:
+
+**System Settings (no Terminal):**
+1. Double‑click the app, then click **Done** on the warning (do **not** move it
+   to the Bin).
+2. Open **System Settings → Privacy & Security**, scroll to the **Security**
+   section. You'll see *"DWARFLab Viewer (Unofficial)" was blocked…*
+3. Click **Open Anyway**, authenticate, and confirm **Open Anyway** again. The
+   app is now allowlisted and opens normally from then on.
+
+**Or, one Terminal command** (removes the quarantine flag):
+```bash
+xattr -dr com.apple.quarantine "/Applications/DWARFLab Viewer (Unofficial).app"
+```
+Then launch it normally. (Adjust the path if you didn't move it to
+`/Applications`.)
+
+### Windows
+
+Run `dwarflab-viewer-setup-<version>.exe`. On the SmartScreen prompt, click
+**More info** → **Run anyway**.
+
+### Linux
+
+- **AppImage:** `chmod +x dwarflab-viewer-*-x86_64.AppImage`, then run it.
+  (Needs FUSE; on some distros `sudo apt install libfuse2`.)
+- **.deb:** `sudo apt install ./dwarflab-viewer_*_amd64.deb`
 
 ## Connecting to your telescope
 
