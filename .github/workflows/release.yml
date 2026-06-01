@@ -62,10 +62,13 @@ jobs:
         include:
           - os: macos-latest
             platform: mac
+            cxxflags: ""
           - os: windows-latest
             platform: win
+            cxxflags: ""
           - os: ubuntu-latest
             platform: linux
+            cxxflags: "-std=c++17"
 
     steps:
       - name: Checkout
@@ -76,7 +79,7 @@ jobs:
       # udev development headers, which aren't on the runner by default.
       - name: Install Linux native build deps
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev build-essential
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -114,3 +117,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # node-addon-api headers (pulled in by the `usb` dep of noble's Linux
+          # Bluetooth stack) require C++17 (std::string_view). The Ubuntu
+          # runner's g++ defaults to an older standard, so force C++17. Empty on
+          # macOS/Windows, whose default toolchains already build these modules.
+          CXXFLAGS: ${{ matrix.cxxflags }}
