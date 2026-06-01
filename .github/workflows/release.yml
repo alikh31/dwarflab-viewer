@@ -84,10 +84,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      # `npm install` (not `npm ci`) to dodge npm's optional-dependency bug that
-      # can skip the platform-specific @rollup/rollup-* binary the Vite build needs.
+      # Remove the lockfile before installing to dodge npm's optional-dependency
+      # bug (npm/cli#4828) that can skip the platform-specific @rollup/rollup-*
+      # binary the Vite build needs. A fresh resolve installs the right one.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        shell: bash
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --no-fund
         env:
           npm_config_build_from_source: "false"
 
