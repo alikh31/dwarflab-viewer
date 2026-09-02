@@ -104,6 +104,11 @@ jobs:
           npm install --no-audit --no-fund
         env:
           npm_config_build_from_source: "false"
+          # Visual Studio 2026's MSVC STL rejects the legacy `/await` +
+          # <experimental/coroutine> used by noble's WinRT binding (STL1011)
+          # unless this macro is defined; cl.exe reads it from the CL env var.
+          # Harmless on the other runners.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
       - name: Build renderer/main/preload
         run: npm run build
@@ -117,6 +122,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # electron-builder rebuilds the native BLE modules against Electron's
+          # headers here; same VS 2026 / STL1011 workaround as the install step.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
           # Electron 34's V8 headers require C++20 (std::ranges, contiguous_iterator)
           # when rebuilding the native BLE modules (@abandonware/bluetooth-hci-socket,
           # usb) on Linux. The Ubuntu runner's g++ defaults to an older standard, so

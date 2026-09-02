@@ -50,6 +50,12 @@ jobs:
           npm install --no-audit --no-fund
         env:
           npm_config_build_from_source: "false"
+          # windows-latest ships Visual Studio 2026, whose MSVC STL turns the
+          # legacy `/await` + <experimental/coroutine> used by noble's WinRT
+          # binding into a hard error (STL1011) unless this macro is defined.
+          # cl.exe picks up extra options from the CL environment variable.
+          # Harmless on the other runners.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
       - name: Typecheck
         run: npm run typecheck
