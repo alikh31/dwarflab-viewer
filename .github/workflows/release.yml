@@ -84,7 +84,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       # node-gyp (native @abandonware/noble build) needs Python distutils,
