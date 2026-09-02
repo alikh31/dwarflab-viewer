@@ -1,24 +1,16 @@
 import type { DecoderStats, WorkerInbound, WorkerOutbound } from '../workers/hevc-decoder.worker';
 
 export interface SoftwareHevcEvents {
-  /** The wasm decoder is loaded and accepting data. */
   onReady?: (version: string) => void;
-  /** First picture painted — the <video> now has content. */
   onFirstFrame?: (width: number, height: number) => void;
-  /** Periodic throughput / drop counters (about once a second). */
   onStats?: (stats: DecoderStats) => void;
-  /** Unrecoverable failure (wasm failed to load, worker crashed, bad stream). */
   onError?: (message: string) => void;
 }
 
 /**
- * Plays raw Annex B H.265 into a <video> element using the WebAssembly
- * decoder worker — the fallback for machines without hardware HEVC decoding.
- *
- * Decoding and painting happen off the main thread on an OffscreenCanvas. The
- * <video> element shows that canvas via captureStream(), so consumers that
- * read the <video> (videoWidth, drawImage for the focus loupe, …) work exactly
- * as they do with the native MSE path.
+ * Plays raw Annex B H.265 into a <video> through the WebAssembly decoder
+ * worker. Frames are painted on an OffscreenCanvas; the <video> shows it via
+ * captureStream(), so consumers of the <video> element work unchanged.
  */
 export class SoftwareHevcPlayer {
   private readonly worker: Worker;
@@ -31,8 +23,7 @@ export class SoftwareHevcPlayer {
     container: HTMLElement,
     private readonly events: SoftwareHevcEvents = {},
   ) {
-    // The placeholder canvas stays in the document (1px, invisible) so the
-    // frames committed by the worker keep flowing into captureStream().
+    // The placeholder canvas must stay in the document for captureStream() to receive frames.
     this.canvas = document.createElement('canvas');
     this.canvas.width = 1920;
     this.canvas.height = 1080;
@@ -48,19 +39,16 @@ export class SoftwareHevcPlayer {
 
     this.stream = this.canvas.captureStream(30);
     video.srcObject = this.stream;
-    video.play().catch(() => { /* autoplay is muted; play() may still reject before frames exist */ });
+    video.play().catch(() => {});
   }
 
-  /** Feed one chunk of Annex B H.265 as delivered by the stream proxy. */
   feed(chunk: Uint8Array): void {
     if (this.closed) return;
-    // Copy into a standalone buffer so it can be transferred without touching the reader's memory.
     const buffer = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer;
-    // sentAt lets the worker notice when it falls behind real time (see its back-pressure notes).
     this.send({ type: 'data', buffer, sentAt: Date.now() }, [buffer]);
   }
 
-  /** Drop everything queued and resynchronise at the next keyframe (e.g. after a stream reconnect). */
+  /** Drop queued data and resync at the next keyframe (after a stream reconnect). */
   reset(): void {
     if (this.closed) return;
     this.send({ type: 'reset' });
@@ -69,7 +57,7 @@ export class SoftwareHevcPlayer {
   destroy(): void {
     if (this.closed) return;
     this.closed = true;
-    try { this.send({ type: 'close' }); } catch { /* worker may already be gone */ }
+    try { this.send({ type: 'close' }); } catch { /* worker already gone */ }
     this.worker.terminate();
     for (const track of this.stream.getTracks()) track.stop();
     if (this.video.srcObject === this.stream) this.video.srcObject = null;

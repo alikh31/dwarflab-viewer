@@ -1,23 +1,7 @@
 /**
- * Software H.265 decoder worker — libde265 compiled to WebAssembly.
- *
- * Used when Chromium has no hardware HEVC decoder (see lib/hevc-support.ts).
- * The main thread hands us an OffscreenCanvas plus raw Annex B H.265 chunks
- * exactly as the stream proxy emits them (one write per frame, VPS/SPS/PPS
- * before every IDR). We decode, wrap each picture in a VideoFrame (I420) and
- * paint it onto the canvas; the <video> element on the main thread shows the
- * canvas through captureStream(), so nothing else in the UI has to change.
- *
- * Protocol (main → worker): WorkerInbound; (worker → main): WorkerOutbound.
- *
- * Back-pressure: decoding is CPU-bound and single-threaded. On a slow CPU the
- * chunks queue up (in this worker's event loop, where we cannot count them),
- * and latency would grow without bound. Every chunk therefore carries the
- * time it was sent; when we get to a chunk that is older than MAX_LATENCY_MS
- * we are behind, and from the next keyframe on we decode only keyframes
- * (dropping the P-frames of each GOP) until we are current again. That keeps
- * the picture live at ~1 fps under overload instead of minutes behind.
- * Dropped frames are reported in the periodic stats.
+ * Software H.265 decoder worker (libde265 → WebAssembly), used when Chromium
+ * has no hardware HEVC decoder. Receives Annex B chunks from the stream proxy,
+ * decodes them and paints each picture on the OffscreenCanvas it was given.
  */
 import createLibde265 from '@yume-chan/libde265';
 import type { MainModule, Decoder, Image as De265Image } from '@yume-chan/libde265';
@@ -32,9 +16,7 @@ export type WorkerInbound =
 export interface DecoderStats {
   decoded: number;
   dropped: number;
-  /** Age of the most recently processed chunk when it was decoded (ms). */
   latencyMs: number;
-  /** Average wall-clock milliseconds spent decoding+painting one chunk (recent window). */
   msPerFrame: number;
 }
 
@@ -44,9 +26,7 @@ export type WorkerOutbound =
   | { type: 'stats'; stats: DecoderStats }
   | { type: 'error'; message: string };
 
-// The renderer tsconfig only includes the DOM lib; describe the little we need
-// of the worker global scope instead of pulling in lib.webworker (which
-// conflicts with lib.dom in one compilation unit).
+// Minimal worker-scope typing; the renderer tsconfig only has lib.dom.
 interface WorkerScope {
   postMessage(message: WorkerOutbound, transfer?: Transferable[]): void;
   onmessage: ((ev: MessageEvent<WorkerInbound>) => void) | null;
@@ -55,7 +35,6 @@ interface WorkerScope {
 const scope = self as unknown as WorkerScope;
 const post = (message: WorkerOutbound): void => scope.postMessage(message);
 
-/** A chunk older than this when we reach it means we are not keeping up. */
 const MAX_LATENCY_MS = 1000;
 const STATS_INTERVAL_MS = 1000;
 
@@ -71,7 +50,6 @@ let ctx2d: OffscreenCanvasRenderingContext2D | null = null;
 
 let queue: QueuedChunk[] = [];
 let pumping = false;
-/** Dropping non-keyframe chunks until the next random-access point. */
 let skipping = true;
 let closed = false;
 
@@ -83,9 +61,9 @@ let announcedFirstFrame = false;
 let windowFrames = 0;
 let windowMs = 0;
 let lastStatsAt = 0;
-let staging: Uint8Array | null = null; // reusable I420 staging buffer
+let staging: Uint8Array | null = null;
 
-/** Does this Annex B chunk contain an IRAP slice (types 16–21) or a VPS (32)? */
+/** IRAP slice (types 16–21) or VPS (32) present in this Annex B chunk? */
 function hasRandomAccessPoint(chunk: Uint8Array): boolean {
   const n = chunk.length;
   for (let i = 0; i + 3 < n; i++) {
@@ -98,8 +76,6 @@ function hasRandomAccessPoint(chunk: Uint8Array): boolean {
   return false;
 }
 
-// Yield between chunks so incoming messages interleave with decoding,
-// without setTimeout's clamping.
 const yieldThen = (() => {
   const channel = new MessageChannel();
   let pending: (() => void) | null = null;
@@ -182,11 +158,7 @@ function decodeChunk(chunk: Uint8Array): void {
   for (;;) {
     const result = decoder.decode();
     drainPictures();
-    if (!libde265.isOk(result.error)) {
-      // WAITING_FOR_INPUT_DATA just means "give me the next chunk". Anything
-      // else is a bitstream warning libde265 already recovered from.
-      break;
-    }
+    if (!libde265.isOk(result.error)) break; // needs more data, or a warning libde265 recovered from
     if (!result.more) break;
   }
   windowMs += performance.now() - t0;
@@ -210,25 +182,18 @@ function maybePostStats(): void {
   windowMs = 0;
 }
 
-/** Decide what to do with the next chunk: decode it, or drop it to catch up. */
+// Behind real time by more than MAX_LATENCY_MS: decode keyframes only until caught up.
 function processChunk(item: QueuedChunk): void {
   const age = Date.now() - item.sentAt;
   latencyMs = age;
   const keyframe = hasRandomAccessPoint(item.data);
 
   if (keyframe) {
-    if (skipping) {
-      // Resuming after drops (or first data): start clean at this IRAP.
-      decoder?.reset();
-    }
-    // Behind by more than the budget? Decode this keyframe but drop the rest
-    // of its GOP — the cheapest way to get back to the live edge without
-    // corrupting references (P-frames need every frame before them).
+    if (skipping) decoder?.reset();
     skipping = age > MAX_LATENCY_MS;
     decodeChunk(item.data);
     return;
   }
-
   if (skipping) {
     dropped++;
     return;
@@ -267,7 +232,6 @@ async function init(offscreen: OffscreenCanvas): Promise<void> {
   }
   try {
     libde265 = await createLibde265({
-      // Vite emits the wasm as a static asset; point Emscripten at it.
       locateFile: (file: string) => (file.endsWith('.wasm') ? libde265WasmUrl : file),
     });
     decoder = new libde265.Decoder();
@@ -294,7 +258,6 @@ scope.onmessage = (ev: MessageEvent<WorkerInbound>) => {
       break;
 
     case 'reset':
-      // Stream (re)connected mid-GOP: wait for the next keyframe.
       queue = [];
       skipping = true;
       break;

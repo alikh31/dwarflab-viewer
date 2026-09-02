@@ -11,8 +11,7 @@ interface Props {
   /** Stable identifier so other components can find this element regardless of
    * label/title strings (which differ between main view and PiP). */
   cameraId?: 'tele' | 'wide';
-  /** Show the small "software decoder" badge when the wasm fallback is active
-   * (off for the PiP tile, which has no room). Default: true. */
+  /** Show the "Software H.265" badge when the wasm decoder is active. Default: true. */
   showDecoderBadge?: boolean;
   /** Fired when the stream enters TERMINAL failure (all retries + the RTSP
    * re-arm exhausted) — i.e. the daemon is likely dead and only a device reboot
@@ -22,7 +21,6 @@ interface Props {
   onStreamRecovered?: () => void;
 }
 
-// One toast per session, not one per <video> (main view + PiP both mount).
 let softwareDecodeAnnounced = false;
 function announceSoftwareDecoding(): void {
   if (softwareDecodeAnnounced) return;
@@ -31,19 +29,10 @@ function announceSoftwareDecoding(): void {
 }
 
 /**
- * Plays a live H.265 stream.
- *
- * The proxy streams raw H.265 NAL units (Annex B format) over HTTP. Two ways
- * to get them onto the screen:
- *
- *  - native: jMuxer remuxes to fMP4 and feeds Media Source Extensions;
- *    Chromium's platform HEVC decoder (VideoToolbox on macOS, D3D11 on
- *    Windows, VA-API on Linux) does hardware decode. Chromium has no software
- *    HEVC decoder, so this only works when the GPU/driver can decode HEVC.
- *  - wasm: libde265 compiled to WebAssembly decodes in a worker and paints
- *    frames onto a canvas that backs the <video> via captureStream(). Used
- *    when MSE rejects HEVC (see lib/hevc-support.ts), or if the native path
- *    hits a decode error at runtime.
+ * Plays a live H.265 stream. The proxy streams raw NAL units (Annex B) over
+ * HTTP. Native mode: jMuxer → fMP4 → MSE with Chromium's hardware HEVC
+ * decoder. Wasm mode (no hardware decoder): libde265 in a worker, painted to a
+ * canvas that backs the <video> via captureStream().
  */
 export function MjpegStream({ src, alt, className, cameraId, showDecoderBadge = true, onStreamFailed, onStreamRecovered }: Props) {
   const [loaded, setLoaded] = useState(false);
@@ -57,7 +46,6 @@ export function MjpegStream({ src, alt, className, cameraId, showDecoderBadge = 
   const abortRef = useRef<AbortController | null>(null);
   const jmuxerRef = useRef<JMuxer | null>(null);
   const playerRef = useRef<SoftwareHevcPlayer | null>(null);
-  // Only fall back native → wasm once; if wasm fails too, show the error.
   const fellBackRef = useRef(false);
 
   // Notify the parent on terminal-failure / recovery transitions. Kept in an
@@ -139,10 +127,8 @@ export function MjpegStream({ src, alt, className, cameraId, showDecoderBadge = 
           void err;
           if (abort.signal.aborted) return;
           if (!fellBackRef.current) {
-            // MSE accepted the codec but decoding still failed (GPU process
-            // trouble, driver quirk). Retry once with the software decoder.
             fellBackRef.current = true;
-            setMode('wasm');
+            setMode('wasm'); // hardware decode failed at runtime; retry once in software
             return;
           }
           setError(true);
@@ -152,8 +138,7 @@ export function MjpegStream({ src, alt, className, cameraId, showDecoderBadge = 
       jmuxerRef.current = jmuxer;
     }
 
-    // Periodically skip to live edge if the MSE buffer grows too large. Not
-    // needed for the wasm path: a captureStream() <video> has no buffer.
+    // Periodically skip to live edge if buffer grows too large
     const catchupInterval = mode === 'native'
       ? setInterval(() => {
           if (video.buffered.length > 0 && !video.paused) {
@@ -205,8 +190,7 @@ export function MjpegStream({ src, alt, className, cameraId, showDecoderBadge = 
             return;
           }
 
-          // Successful connection — reset attempt counter. A reconnect means
-          // the byte stream restarts mid-GOP; tell the wasm decoder to resync.
+          // Successful connection — reset attempt counter
           attempts = 0;
           player?.reset();
           const reader = res.body.getReader();
