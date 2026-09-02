@@ -23,7 +23,18 @@ npm install
 npm run dev
 ```
 
-`npm install` runs `patch-package` (a `jmuxer` patch is applied automatically).
+`npm install` runs `patch-package` as a postinstall step. No patches are needed at
+the moment — the former `jmuxer` codec-string fix was upstreamed in jmuxer 2.1.3 —
+but the hook stays so a future patch in `patches/` applies automatically.
+
+`package.json` overrides `node-gyp` to 12.x for every dependency that builds a
+native module (the BLE stack, and `@electron/rebuild` when packaging). The
+versions those packages ask for (9.x / 10.x) don't recognise Visual Studio 2026,
+which is what GitHub's `windows-latest` runners now ship, so Windows installs
+and packaging fail without the override. On Windows you need Visual Studio (or
+the Build Tools) with the "Desktop development with C++" workload for the native
+build; the pure-JS build (`npm run build`) works without it if you install with
+`--ignore-scripts` and run `npx patch-package` yourself.
 
 ## Before opening a pull request
 

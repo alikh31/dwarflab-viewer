@@ -16,6 +16,9 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react(), tailwindcss()],
+    worker: { format: 'es' },
+    // libde265's Emscripten build breaks under the dev-server dependency optimizer
+    optimizeDeps: { exclude: ['@yume-chan/libde265'] },
     build: {
       rollupOptions: {
         input: './src/renderer/index.html',

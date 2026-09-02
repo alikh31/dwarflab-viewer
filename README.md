@@ -22,7 +22,9 @@ A native desktop window that connects to a DWARF telescope on your local
 network and gives you:
 
 - **Live camera view** — H.265 RTSP streams (tele + wide) decoded in-app, with
-  no external dependencies (pure-Node RTSP → fMP4 via MSE; no ffmpeg).
+  no external dependencies (pure-Node RTSP → fMP4 via MSE; no ffmpeg). PCs
+  without a hardware H.265 decoder fall back to a built-in WebAssembly
+  software decoder (see [Video decoding](#video-decoding)).
 - **Focus** — auto-focus, astro auto-focus, and a magnifier loupe with edge
   detection for manual focusing.
 - **Mount control** — on-screen direction pad, keyboard, and gamepad slewing.
@@ -108,6 +110,33 @@ telescope before it's on your network. BLE needs OS-level access:
 
 If Bluetooth is unavailable, the rest of the app still works normally — just do
 Wi-Fi setup another way and connect by IP.
+
+## Video decoding
+
+The telescope only streams **H.265 (HEVC)**, and Chromium (Electron) has no
+software HEVC decoder: it can play HEVC only through a *hardware* decoder in
+your GPU/driver. The app picks the path automatically:
+
+- **Hardware** (default when available) — the stream is remuxed to fMP4 and
+  played through Media Source Extensions with GPU decoding. Near-zero CPU.
+- **Software fallback** — if your PC has no usable hardware HEVC decoder
+  (older GPUs, generic display drivers, remote-desktop sessions, GPU
+  acceleration disabled), frames are decoded on the CPU by
+  [libde265](https://github.com/strukturag/libde265) compiled to WebAssembly
+  (via [`@yume-chan/libde265`](https://www.npmjs.com/package/@yume-chan/libde265),
+  LGPL-3.0). You'll see a one-time notice and a small *Software H.265* badge on
+  the main view. It needs roughly one CPU core per 1080p stream; if the CPU
+  can't keep up, the decoder drops to keyframes only (≈1 fps) instead of
+  falling behind, and the badge shows the dropped-frame count.
+
+Before relying on the fallback, check the easy fixes for hardware decoding:
+update the GPU driver, don't run the app over Remote Desktop, and make sure GPU
+acceleration isn't disabled. For testing, you can force either path from the
+DevTools console:
+
+```js
+localStorage.setItem('dwarflab.hevcDecoder', 'wasm');   // or 'native'; remove to auto-detect
+```
 
 ## Device support
 

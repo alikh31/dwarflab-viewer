@@ -50,6 +50,8 @@ jobs:
           npm install --no-audit --no-fund
         env:
           npm_config_build_from_source: "false"
+          # VS 2026's MSVC rejects noble's legacy /await coroutines without this define
+          CL: -D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
       - name: Typecheck
         run: npm run typecheck
