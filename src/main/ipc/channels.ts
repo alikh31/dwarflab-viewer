@@ -118,6 +118,7 @@ export const IPC = {
 
   // System
   SDK_SYSTEM_SET_LOCATION: 'sdk:system:setLocation',
+  SDK_REBOOT: 'sdk:system:reboot',
 
   // Settings (local persistence in userData/settings.json)
   SETTINGS_GET: 'settings:get',

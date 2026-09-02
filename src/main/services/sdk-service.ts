@@ -16,6 +16,8 @@ interface DeviceStateSnapshot {
   focusPosition: number | null;
   filterType: number | null;
   connected: boolean;
+  // Tele RTSP route is gone for good (e.g. after astro auto-focus); only a reboot recovers it.
+  teleStreamDead: boolean;
   // Astro pipeline state (populated by 152xx notifications). All null until
   // the corresponding operation has reported state for the first time;
   // cleared back to null on terminal states so the UI can tell "never run"
@@ -88,6 +90,7 @@ const FRESH_STATE = (): DeviceStateSnapshot => ({
   focusPosition: null,
   filterType: null,
   connected: false,
+  teleStreamDead: false,
   calibrationState: null,
   gotoState: null,
   eqSolvingState: null,
@@ -234,6 +237,54 @@ export class SdkService {
 
   setStreamProxy(proxy: StreamProxyService): void {
     this.streamProxy = proxy;
+    proxy.onStatus((name, status) => {
+      if (name !== 'tele') return;
+      if (status === 'connected') {
+        this.teleRtspFailures = 0;
+        this.setTeleStreamDead(false);
+        return;
+      }
+      this.teleRtspFailures++;
+      const stacking = this.state.stackingJob != null && this.state.stackingJob.state !== 'stopped';
+      if (stacking) return; // the firmware drops the route during a stack; it is re-armed when the stack ends
+      const afterAstroAf = Date.now() - this.astroAfEndedAt < 30000;
+      if (afterAstroAf || this.teleRtspFailures >= 4) {
+        this.setTeleStreamDead(true);
+      } else if (this.teleRtspFailures === 2) {
+        void this.rearmCameraRoutes();
+      }
+    });
+  }
+
+  private teleRtspFailures = 0;
+  private astroAfEndedAt = 0;
+
+  private setTeleStreamDead(dead: boolean): void {
+    if (this.state.teleStreamDead === dead) return;
+    this.state.teleStreamDead = dead;
+    if (this.lastWindow) this.scheduleStatePush(this.lastWindow);
+  }
+
+  /**
+   * Soft-reboot (13505). The firmware acks every time but only actually reboots
+   * about every other time, so if the link is still up after 10 s send it once more.
+   */
+  async rebootDevice(): Promise<void> {
+    const client = this.getClient();
+    await client.sendCommandNoWait(Command.RGB_POWER_REBOOT).catch(() => {});
+    if (await this.linkStillUp(10000)) {
+      await client.sendCommandNoWait(Command.RGB_POWER_REBOOT).catch(() => {});
+      await this.linkStillUp(10000);
+    }
+  }
+
+  private async linkStillUp(ms: number): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (!this.client?.connected) return false;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return this.client?.connected ?? false;
   }
 
   /**
@@ -473,6 +524,15 @@ export class SdkService {
         break;
       case 15257: // NOTIFY_FOCUS_POSITION
         if (typeof d.pos === 'number') this.state.focusPosition = d.pos;
+        break;
+      case 15234: // NOTIFY_STREAM_TYPE — tele switching to type 2 means the RTSP route is gone
+        if (d.streamType === 2 && (d.camId ?? 0) === 0 && this.state.stackingJob == null) {
+          this.setTeleStreamDead(true);
+        }
+        break;
+      case 15278: // NOTIFY_ASTRO_AUTO_FOCUS_STATE
+      case 15280: // NOTIFY_ASTRO_AUTO_FOCUS_FAST_STATE — terminal (3 or empty) arms the "dead after AF" check
+        if (d.state === 3 || typeof d.state !== 'number') this.astroAfEndedAt = Date.now();
         break;
       case 15264: { // NOTIFY_GENERAL_INT_PARAM — echoed param changes
         // paramId comes through as string (Long.toString()); decode it

@@ -11,6 +11,11 @@ import { RtspClient, NalUnit } from './rtsp-client';
  */
 
 const ANNEX_B_START = Buffer.from([0x00, 0x00, 0x00, 0x01]);
+// No NALs for this long on a connected route means the firmware silently dropped it.
+const STALL_MS = 8000;
+
+export type StreamName = 'tele' | 'wide';
+export type StreamStatusListener = (name: StreamName, status: 'connected' | 'failed', detail?: string) => void;
 
 interface StreamEntry {
   rtsp: RtspClient | null;
@@ -20,16 +25,23 @@ interface StreamEntry {
   // Frame batching: accumulate NALs until RTP marker bit signals end-of-frame
   pendingNals: Buffer[];
   lastTimestamp: number;
+  lastNalAt: number;
 }
 
 export class StreamProxyService {
   private server: Server | null = null;
-  private streams = new Map<string, StreamEntry>();
+  private streams = new Map<StreamName, StreamEntry>();
   private host: string | null = null;
   private _port = 0;
+  private statusListener: StreamStatusListener | null = null;
+  private stallTimer: ReturnType<typeof setInterval> | null = null;
 
   get port(): number {
     return this._port;
+  }
+
+  onStatus(listener: StreamStatusListener | null): void {
+    this.statusListener = listener;
   }
 
   async start(): Promise<number> {
@@ -76,14 +88,19 @@ export class StreamProxyService {
     this.host = host;
 
     // Create persistent entries — HTTP clients attach here and survive RTSP reconnects
-    this.streams.set('tele', { rtsp: null, clients: new Set(), connected: false, gotKeyframe: false, pendingNals: [], lastTimestamp: -1 });
-    this.streams.set('wide', { rtsp: null, clients: new Set(), connected: false, gotKeyframe: false, pendingNals: [], lastTimestamp: -1 });
+    this.streams.set('tele', { rtsp: null, clients: new Set(), connected: false, gotKeyframe: false, pendingNals: [], lastTimestamp: -1, lastNalAt: 0 });
+    this.streams.set('wide', { rtsp: null, clients: new Set(), connected: false, gotKeyframe: false, pendingNals: [], lastTimestamp: -1, lastNalAt: 0 });
 
     this.connectRtsp('tele', `rtsp://${host}:554/ch0/stream0`);
     this.connectRtsp('wide', `rtsp://${host}:554/ch1/stream0`);
+    this.stallTimer = setInterval(() => this.checkStalls(), 2000);
   }
 
   stopStreams(): void {
+    if (this.stallTimer) {
+      clearInterval(this.stallTimer);
+      this.stallTimer = null;
+    }
     for (const [, entry] of this.streams) {
       entry.rtsp?.destroy();
       for (const res of entry.clients) {
@@ -103,7 +120,22 @@ export class StreamProxyService {
     }
   }
 
-  private connectRtsp(name: string, rtspUrl: string): void {
+  private urlFor(name: StreamName): string {
+    return `rtsp://${this.host}:554/${name === 'tele' ? 'ch0' : 'ch1'}/stream0`;
+  }
+
+  private checkStalls(): void {
+    if (!this.host) return;
+    for (const [name, entry] of this.streams) {
+      if (entry.connected && entry.rtsp && Date.now() - entry.lastNalAt > STALL_MS) {
+        console.log(`[StreamProxy] ${name} stalled (no NALs for ${STALL_MS}ms), reconnecting`);
+        this.statusListener?.(name, 'failed', 'stalled');
+        this.connectRtsp(name, this.urlFor(name));
+      }
+    }
+  }
+
+  private connectRtsp(name: StreamName, rtspUrl: string): void {
     const entry = this.streams.get(name);
     if (!entry) return;
 
@@ -120,15 +152,20 @@ export class StreamProxyService {
 
     rtsp.connect().then(() => {
       entry.connected = true;
+      entry.lastNalAt = Date.now();
       console.log(`[StreamProxy] ${name} RTSP connected ${rtspUrl}`);
+      this.statusListener?.(name, 'connected');
     }).catch((err) => {
-      console.log(`[StreamProxy] ${name} RTSP connect failed: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      console.log(`[StreamProxy] ${name} RTSP connect failed: ${message}`);
+      this.statusListener?.(name, 'failed', message);
       this.retryRtsp(name, 3000);
     });
 
     let nalCount = 0;
     rtsp.on('nal', (nal: NalUnit) => {
       nalCount++;
+      entry.lastNalAt = Date.now();
       if (nalCount === 1 || nalCount === 10 || nalCount === 100) {
         console.log(`[StreamProxy] ${name} got ${nalCount} NALs (latest isKeyframe=${nal.isKeyframe} marker=${nal.marker} size=${nal.data.length})`);
       }
@@ -147,13 +184,12 @@ export class StreamProxyService {
     });
   }
 
-  private retryRtsp(name: string, delayMs: number): void {
+  private retryRtsp(name: StreamName, delayMs: number): void {
     if (!this.host || !this.streams.has(name)) return;
     const host = this.host;
     setTimeout(() => {
       if (this.host === host && this.streams.has(name)) {
-        const channel = name === 'tele' ? 'ch0' : 'ch1';
-        this.connectRtsp(name, `rtsp://${host}:554/${channel}/stream0`);
+        this.connectRtsp(name, this.urlFor(name));
       }
     }, delayMs);
   }
@@ -202,7 +238,7 @@ export class StreamProxyService {
   private handleRequest(req: IncomingMessage, res: ServerResponse): void {
     const url = req.url || '/';
 
-    let streamName: string | null = null;
+    let streamName: StreamName | null = null;
     if (url.startsWith('/tele')) streamName = 'tele';
     else if (url.startsWith('/wide')) streamName = 'wide';
 

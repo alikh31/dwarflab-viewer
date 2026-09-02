@@ -104,6 +104,34 @@ export function AstroPanel({ onOpenEqWizard, onOpenGoto, onOpenLocation, onOpenS
     }
   };
 
+  // Astro AF is armed on the first click and fired on the second; if the firmware
+  // finds no stars it drops the tele stream until the telescope is rebooted.
+  const [astroAfArmed, setAstroAfArmed] = useState(false);
+  useEffect(() => {
+    if (!astroAfArmed) return;
+    const t = setTimeout(() => setAstroAfArmed(false), 6000);
+    return () => clearTimeout(t);
+  }, [astroAfArmed]);
+
+  const handleAstroAf = async () => {
+    if (busy) return;
+    if (!astroAfArmed) {
+      setAstroAfArmed(true);
+      pushToast('Astro AF needs stars in view. If it fails, the tele stream stops until a reboot. Click again to run it.', 'warn', 6000);
+      return;
+    }
+    setAstroAfArmed(false);
+    setBusy(true);
+    try {
+      await window.api.sdk.focusAstroAutoStart();
+      pushToast('Astro auto-focusing…', 'ok');
+    } catch (e) {
+      pushToast(`Astro AF failed: ${(e as Error).message}`, 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleGoto = async () => {
     if (busy) return;
     if (slewing) {
@@ -230,6 +258,20 @@ export function AstroPanel({ onOpenEqWizard, onOpenGoto, onOpenLocation, onOpenS
         ) : (
           'Stack…'
         )}
+      </button>
+
+      {/* Astro AF — star-based autofocus, two clicks (see handleAstroAf). */}
+      <button
+        onClick={handleAstroAf}
+        disabled={busy || !ds.connected}
+        title={astroAfArmed ? 'Click again to run astro auto-focus' : 'Star-based auto-focus (needs stars; can require a reboot if it fails)'}
+        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-50
+          ${astroAfArmed
+            ? 'bg-amber-400/20 text-amber-100 ring-1 ring-amber-400/40'
+            : 'text-white/60 hover:text-white hover:bg-white/10'
+          }`}
+      >
+        {astroAfArmed ? 'Confirm Astro AF' : 'Astro AF'}
       </button>
 
       <div className="w-px h-5 bg-white/10 mx-1" />

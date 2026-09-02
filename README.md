@@ -26,7 +26,11 @@ network and gives you:
   without a hardware H.265 decoder fall back to a built-in WebAssembly
   software decoder (see [Video decoding](#video-decoding)).
 - **Focus** — auto-focus, astro auto-focus, and a magnifier loupe with edge
-  detection for manual focusing.
+  detection for manual focusing. The AF button always runs the regular
+  contrast auto-focus; the star-based *Astro AF* lives in the Astro panel
+  behind a confirmation, because on current firmware (v1.5.x) it stops the
+  tele stream for good when it finds no stars (e.g. in daylight). If that
+  happens the app offers a one-click telescope reboot.
 - **Mount control** — on-screen direction pad, keyboard, and gamepad slewing.
 - **Astrophotography** — plate-solve calibration, GoTo (with a built-in target
   catalog), EQ polar-alignment wizard, and live stacking with a live preview.
