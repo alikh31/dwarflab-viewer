@@ -13,6 +13,7 @@ const DEFAULT_STATE: DeviceStateSnapshot = {
   focusPosition: null,
   filterType: null,
   connected: false,
+  teleStreamDead: false,
   calibrationState: null,
   gotoState: null,
   eqSolvingState: null,
@@ -24,15 +25,21 @@ const DEFAULT_STATE: DeviceStateSnapshot = {
   burstProgress: null,
 };
 
+// Last snapshot seen by any instance, so a component mounted later (e.g. a
+// toolbar panel) doesn't start from defaults until the next push arrives.
+let lastSnapshot: DeviceStateSnapshot = DEFAULT_STATE;
+
 export function useDeviceState(): DeviceStateSnapshot {
-  const [state, setState] = useState<DeviceStateSnapshot>(DEFAULT_STATE);
+  const [state, setState] = useState<DeviceStateSnapshot>(lastSnapshot);
 
   useEffect(() => {
     const cleanupConn = window.api.sdk.onConnectionState(({ connected }) => {
-      setState((prev) => ({ ...prev, connected }));
+      lastSnapshot = { ...lastSnapshot, connected };
+      setState(lastSnapshot);
     });
     const cleanupState = window.api.sdk.onDeviceState((snapshot) => {
-      setState(snapshot as DeviceStateSnapshot);
+      lastSnapshot = snapshot as DeviceStateSnapshot;
+      setState(lastSnapshot);
     });
     return () => {
       cleanupConn();

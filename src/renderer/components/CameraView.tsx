@@ -41,7 +41,26 @@ export function CameraView({ host, onDisconnect }: Props) {
   // §4.4). Dismissible; auto-clears if the stream recovers.
   const [streamDead, setStreamDead] = useState(false);
   const [rebootBannerDismissed, setRebootBannerDismissed] = useState(false);
+  const [rebooting, setRebooting] = useState(false);
   const deviceState = useDeviceState();
+
+  useEffect(() => {
+    if (deviceState.teleStreamDead) setRebootBannerDismissed(false);
+  }, [deviceState.teleStreamDead]);
+
+  const handleReboot = useCallback(async () => {
+    if (rebooting) return;
+    setRebooting(true);
+    try {
+      await window.api.sdk.rebootDevice();
+      pushToast('Telescope is rebooting — reconnect in about a minute', 'ok', 6000);
+      onDisconnect();
+    } catch (e) {
+      pushToast(`Reboot failed: ${(e as Error).message}`, 'err');
+    } finally {
+      setRebooting(false);
+    }
+  }, [rebooting, onDisconnect]);
 
   // Authoritative "a stack is active" signal (running OR stopping), from the
   // stackingJob descriptor — persists across the first-progress gap + reconnect.
@@ -173,15 +192,25 @@ export function CameraView({ host, onDisconnect }: Props) {
 
       {/* Severe-failure banner — the stream stayed dead even after RTSP re-arm;
           likely needs a device reboot (NOT an astro-reset). Dismissible. */}
-      {streamDead && !rebootBannerDismissed && (
+      {(streamDead || deviceState.teleStreamDead) && !rebootBannerDismissed && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
           <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-amber-400/15 backdrop-blur-xl border border-amber-400/30 shadow-2xl shadow-black/30">
             <svg className="w-4 h-4 text-amber-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
             <span className="text-sm text-amber-100">
-              Live view unavailable — the device may need a reboot.
+              {deviceState.teleStreamDead
+                ? 'The tele camera stopped streaming (this happens after astro auto-focus). Only a reboot brings it back.'
+                : 'Live view unavailable — the device may need a reboot.'}
             </span>
+            <button
+              onClick={handleReboot}
+              disabled={rebooting}
+              className="px-3 py-1 rounded-full bg-amber-400/30 hover:bg-amber-400/45 text-xs font-medium text-white transition-colors disabled:opacity-60"
+              title="Soft-reboot the telescope (about a minute)"
+            >
+              {rebooting ? 'Rebooting…' : 'Reboot telescope'}
+            </button>
             <button
               onClick={onDisconnect}
               className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-xs font-medium text-white transition-colors"

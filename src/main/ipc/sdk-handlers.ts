@@ -37,6 +37,10 @@ export function registerSdkHandlers(
     return await client.device.getDeviceInfo();
   });
 
+  ipcMain.handle(IPC.SDK_REBOOT, async () => {
+    await sdkService.rebootDevice();
+  });
+
   // Camera streams are handled by RTSP (port 554) transcoded via ffmpeg.
   // The firmware ignores openCamera (cmd 10000/12000), so these are no-ops.
   ipcMain.handle(IPC.SDK_CAMERA_TELE_OPEN, async () => {});

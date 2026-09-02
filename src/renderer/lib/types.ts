@@ -23,6 +23,7 @@ export interface DeviceStateSnapshot {
   focusPosition: number | null;
   filterType: number | null;        // 0=VIS, 1=Astro, 2=Duo (echoed via 15264)
   connected: boolean;
+  teleStreamDead: boolean;          // tele RTSP gone until reboot (see sdk-service)
   // Astro pipeline. Must stay in sync field-for-field with the snapshot
   // built in main/services/sdk-service.ts.
   calibrationState: { state: number; plateSolvingTimes: number } | null;
@@ -142,6 +143,7 @@ export interface DwarfApi {
     focusStep(direction: number): Promise<void>;
     focusAstroAutoStart(): Promise<void>;
     focusAstroAutoStop(): Promise<void>;
+    rebootDevice(): Promise<void>;
 
     // Tracking
     stopTracking(): Promise<void>;
