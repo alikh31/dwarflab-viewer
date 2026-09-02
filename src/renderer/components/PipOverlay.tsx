@@ -38,7 +38,7 @@ export function PipOverlay({ src, label, cameraId, onTap }: Props) {
                     shadow-2xl shadow-black/50 border border-white/10
                     transition-transform duration-200 hover:scale-[1.02]"
       >
-        <MjpegStream src={src} alt={label} cameraId={cameraId} className="h-full w-full" />
+        <MjpegStream src={src} alt={label} cameraId={cameraId} className="h-full w-full" showDecoderBadge={false} />
       </div>
       <div
         className="absolute bottom-2 left-3 text-xs font-medium text-white/70

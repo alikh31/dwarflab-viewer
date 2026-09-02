@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import JMuxer from 'jmuxer';
+import { detectHevcDecoder, type HevcDecoderMode } from '../lib/hevc-support';
+import { SoftwareHevcPlayer } from '../lib/software-hevc';
+import { pushToast } from '../hooks/useToasts';
 
 interface Props {
   src: string;
@@ -8,6 +11,9 @@ interface Props {
   /** Stable identifier so other components can find this element regardless of
    * label/title strings (which differ between main view and PiP). */
   cameraId?: 'tele' | 'wide';
+  /** Show the small "software decoder" badge when the wasm fallback is active
+   * (off for the PiP tile, which has no room). Default: true. */
+  showDecoderBadge?: boolean;
   /** Fired when the stream enters TERMINAL failure (all retries + the RTSP
    * re-arm exhausted) — i.e. the daemon is likely dead and only a device reboot
    * recovers it. Used by CameraView to surface the §4.4 reboot banner. */
@@ -16,20 +22,43 @@ interface Props {
   onStreamRecovered?: () => void;
 }
 
+// One toast per session, not one per <video> (main view + PiP both mount).
+let softwareDecodeAnnounced = false;
+function announceSoftwareDecoding(): void {
+  if (softwareDecodeAnnounced) return;
+  softwareDecodeAnnounced = true;
+  pushToast('No hardware H.265 decoder found — using the software decoder (higher CPU use)', 'warn', 6000);
+}
+
 /**
- * Plays a live H.265 stream using jMuxer for fMP4 muxing + MSE playback.
+ * Plays a live H.265 stream.
  *
- * The proxy streams raw H.265 NAL units (Annex B format) over HTTP.
- * jMuxer handles all fMP4 box generation and MSE SourceBuffer management.
- * Chromium's native HEVC decoder (VideoToolbox on macOS) does HW decode.
+ * The proxy streams raw H.265 NAL units (Annex B format) over HTTP. Two ways
+ * to get them onto the screen:
+ *
+ *  - native: jMuxer remuxes to fMP4 and feeds Media Source Extensions;
+ *    Chromium's platform HEVC decoder (VideoToolbox on macOS, D3D11 on
+ *    Windows, VA-API on Linux) does hardware decode. Chromium has no software
+ *    HEVC decoder, so this only works when the GPU/driver can decode HEVC.
+ *  - wasm: libde265 compiled to WebAssembly decodes in a worker and paints
+ *    frames onto a canvas that backs the <video> via captureStream(). Used
+ *    when MSE rejects HEVC (see lib/hevc-support.ts), or if the native path
+ *    hits a decode error at runtime.
  */
-export function MjpegStream({ src, alt, className, cameraId, onStreamFailed, onStreamRecovered }: Props) {
+export function MjpegStream({ src, alt, className, cameraId, showDecoderBadge = true, onStreamFailed, onStreamRecovered }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [mode, setMode] = useState<HevcDecoderMode>(() => detectHevcDecoder());
+  const [decoderReady, setDecoderReady] = useState(false);
+  const [decoderStatus, setDecoderStatus] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const jmuxerRef = useRef<JMuxer | null>(null);
+  const playerRef = useRef<SoftwareHevcPlayer | null>(null);
+  // Only fall back native → wasm once; if wasm fails too, show the error.
+  const fellBackRef = useRef(false);
 
   // Notify the parent on terminal-failure / recovery transitions. Kept in an
   // effect (not the fetch logic) to avoid stale closures and to debounce to the
@@ -52,11 +81,13 @@ export function MjpegStream({ src, alt, className, cameraId, onStreamFailed, onS
   // proxy comes online seconds later.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !src) return;
+    const container = containerRef.current;
+    if (!video || !container || !src) return;
 
     // Cleanup previous
     abortRef.current?.abort();
     jmuxerRef.current?.destroy();
+    playerRef.current?.destroy();
 
     const abort = new AbortController();
     abortRef.current = abort;
@@ -64,38 +95,76 @@ export function MjpegStream({ src, alt, className, cameraId, onStreamFailed, onS
     setLoaded(false);
     setError(false);
     setErrorMsg('');
+    setDecoderReady(mode === 'native');
+    setDecoderStatus('');
 
-    // Create jMuxer instance — it handles MSE internally
-    const jmuxer = new JMuxer({
-      node: video,
-      mode: 'video',
-      videoCodec: 'H265',
-      flushingTime: 0,
-      fps: 30,
-      maxDelay: 100,
-      clearBuffer: true,
-      debug: false,
-      onReady: () => {},
-      onError: (err: Error) => {
-        void err;
-        if (!abort.signal.aborted) {
+    let jmuxer: JMuxer | null = null;
+    let player: SoftwareHevcPlayer | null = null;
+
+    if (mode === 'wasm') {
+      announceSoftwareDecoding();
+      player = new SoftwareHevcPlayer(video, container, {
+        onReady: () => { if (!abort.signal.aborted) setDecoderReady(true); },
+        onFirstFrame: () => {
+          if (abort.signal.aborted) return;
+          setLoaded(true);
+          setError(false);
+        },
+        onStats: (s) => {
+          if (abort.signal.aborted) return;
+          const ms = s.msPerFrame ? `${s.msPerFrame.toFixed(0)} ms/frame` : '';
+          const drops = s.dropped ? ` · ${s.dropped} dropped` : '';
+          setDecoderStatus(`Software H.265${ms ? ' · ' + ms : ''}${drops}`);
+        },
+        onError: (message) => {
+          if (abort.signal.aborted) return;
+          setError(true);
+          setErrorMsg(`Software decoder failed: ${message}`);
+        },
+      });
+      playerRef.current = player;
+    } else {
+      // Create jMuxer instance — it handles MSE internally
+      jmuxer = new JMuxer({
+        node: video,
+        mode: 'video',
+        videoCodec: 'H265',
+        flushingTime: 0,
+        fps: 30,
+        maxDelay: 100,
+        clearBuffer: true,
+        debug: false,
+        onReady: () => {},
+        onError: (err: Error) => {
+          void err;
+          if (abort.signal.aborted) return;
+          if (!fellBackRef.current) {
+            // MSE accepted the codec but decoding still failed (GPU process
+            // trouble, driver quirk). Retry once with the software decoder.
+            fellBackRef.current = true;
+            setMode('wasm');
+            return;
+          }
           setError(true);
           setErrorMsg('Video decode error');
-        }
-      },
-    });
-    jmuxerRef.current = jmuxer;
+        },
+      });
+      jmuxerRef.current = jmuxer;
+    }
 
-    // Periodically skip to live edge if buffer grows too large
-    const catchupInterval = setInterval(() => {
-      if (video.buffered.length > 0 && !video.paused) {
-        const end = video.buffered.end(video.buffered.length - 1);
-        const lag = end - video.currentTime;
-        if (lag > 0.5) {
-          video.currentTime = end - 0.05;
-        }
-      }
-    }, 1000);
+    // Periodically skip to live edge if the MSE buffer grows too large. Not
+    // needed for the wasm path: a captureStream() <video> has no buffer.
+    const catchupInterval = mode === 'native'
+      ? setInterval(() => {
+          if (video.buffered.length > 0 && !video.paused) {
+            const end = video.buffered.end(video.buffered.length - 1);
+            const lag = end - video.currentTime;
+            if (lag > 0.5) {
+              video.currentTime = end - 0.05;
+            }
+          }
+        }, 1000)
+      : null;
 
     let attempts = 0;
     let rearmFired = false;
@@ -136,8 +205,10 @@ export function MjpegStream({ src, alt, className, cameraId, onStreamFailed, onS
             return;
           }
 
-          // Successful connection — reset attempt counter
+          // Successful connection — reset attempt counter. A reconnect means
+          // the byte stream restarts mid-GOP; tell the wasm decoder to resync.
           attempts = 0;
+          player?.reset();
           const reader = res.body.getReader();
           let chunkCount = 0;
 
@@ -147,10 +218,13 @@ export function MjpegStream({ src, alt, className, cameraId, onStreamFailed, onS
 
               chunkCount++;
 
-              jmuxer.feed({ video: new Uint8Array(value.buffer, value.byteOffset, value.byteLength) });
-
-              if (!loaded && chunkCount > 2) {
-                setLoaded(true);
+              if (player) {
+                player.feed(value);
+              } else {
+                jmuxer?.feed({ video: new Uint8Array(value.buffer, value.byteOffset, value.byteLength) });
+                if (!loaded && chunkCount > 2) {
+                  setLoaded(true);
+                }
               }
 
               pump();
@@ -171,15 +245,21 @@ export function MjpegStream({ src, alt, className, cameraId, onStreamFailed, onS
     connect();
 
     return () => {
-      clearInterval(catchupInterval);
+      if (catchupInterval) clearInterval(catchupInterval);
       abort.abort();
-      jmuxer.destroy();
+      jmuxer?.destroy();
       jmuxerRef.current = null;
+      player?.destroy();
+      playerRef.current = null;
     };
-  }, [src]);
+  }, [src, mode]);
+
+  const connectingText = mode === 'wasm' && !decoderReady
+    ? 'Loading software H.265 decoder...'
+    : 'Connecting to stream...';
 
   return (
-    <div className={`relative ${className ?? ''}`}>
+    <div ref={containerRef} className={`relative ${className ?? ''}`}>
       <video
         ref={videoRef}
         muted
@@ -188,13 +268,22 @@ export function MjpegStream({ src, alt, className, cameraId, onStreamFailed, onS
         onCanPlay={() => { setLoaded(true); setError(false); }}
         title={alt}
         data-camera={cameraId}
+        data-decoder={mode}
         className="w-full h-full object-cover"
       />
+      {mode === 'wasm' && showDecoderBadge && loaded && !error && (
+        <div
+          className="absolute bottom-2 right-2 text-[10px] text-white/60 bg-black/40 px-1.5 py-0.5 rounded backdrop-blur-sm pointer-events-none"
+          title="No hardware H.265 decoder is available on this computer, so frames are decoded on the CPU."
+        >
+          {decoderStatus || 'Software H.265'}
+        </div>
+      )}
       {!loaded && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-dwarf-bg/80">
           <div className="flex flex-col items-center gap-3">
             <div className="w-6 h-6 border-2 border-dwarf-accent border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm text-dwarf-muted">Connecting to stream...</span>
+            <span className="text-sm text-dwarf-muted">{connectingText}</span>
           </div>
         </div>
       )}
