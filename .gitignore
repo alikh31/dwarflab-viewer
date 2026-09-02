@@ -27,4 +27,5 @@ npm-debug.log*
 .env.*
 !.env.example
 
-# Note: patches/ IS tracked — patch-package applies it on install.
+# Note: patches/ IS tracked — patch-package applies anything in it on install
+# (currently empty; the old jmuxer patch was upstreamed in jmuxer 2.1.3).

@@ -23,7 +23,9 @@ npm install
 npm run dev
 ```
 
-`npm install` runs `patch-package` (a `jmuxer` patch is applied automatically).
+`npm install` runs `patch-package` as a postinstall step. No patches are needed at
+the moment — the former `jmuxer` codec-string fix was upstreamed in jmuxer 2.1.3 —
+but the hook stays so a future patch in `patches/` applies automatically.
 
 ## Before opening a pull request
 
