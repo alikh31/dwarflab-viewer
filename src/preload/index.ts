@@ -63,6 +63,8 @@ const IPC = {
   // Filter
   SDK_SET_FILTER: 'sdk:filter:set',
 
+  SDK_REBOOT: 'sdk:system:reboot',
+
   SDK_ALBUM_COUNTS: 'sdk:album:counts',
   SDK_ALBUM_LIST: 'sdk:album:list',
   SDK_ALBUM_FILE_URL: 'sdk:album:fileUrl',
@@ -196,6 +198,9 @@ contextBridge.exposeInMainWorld('api', {
 
     // Filter
     setFilter: (value: number) => ipcRenderer.invoke(IPC.SDK_SET_FILTER, value),
+
+    // Soft-reboots the telescope (resolves once the link drops, or after a retry).
+    rebootDevice: (): Promise<void> => ipcRenderer.invoke(IPC.SDK_REBOOT),
 
     // Tracking
     stopTracking: () => ipcRenderer.invoke(IPC.SDK_TRACK_STOP),

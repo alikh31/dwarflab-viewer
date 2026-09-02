@@ -1,12 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { pushToast } from '../hooks/useToasts';
-import { useDeviceState } from '../hooks/useDeviceState';
-
-// Shooting modes that need plate-solving-aware autofocus instead of the
-// regular sensor-contrast AF. Values match the firmware mode enum:
-// 2 = DSO (deep-sky), 4 = Milky Way panorama. Both expose long exposures
-// where regular AF tends to fail with code -15100/-15101.
-const ASTRO_AF_MODES = new Set([2, 4]);
 
 // Friendly mapping for the focus-error range (-15100..-15108).
 function focusErrorMessage(code: number): string {
@@ -43,32 +36,21 @@ export function FocusSlider() {
   const [active, setActive] = useState<0 | 1 | null>(null); // direction currently held
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heldDirection = useRef<0 | 1 | null>(null);
-  const ds = useDeviceState();
-  const useAstroAf = ASTRO_AF_MODES.has(ds.shootingMode ?? -1);
-
-  // In DSO / Milky Way modes, regular contrast-AF tends to time out on
-  // long exposures (code -15100/-15101). Fall back to the dedicated
-  // ASTRO_AUTO_FOCUS (15004) path which uses star detection. Progress
-  // arrives via NOTIFY_ASTRO_AUTO_FOCUS_STATE (15278) — that just toasts
-  // for now, not a state-machine UI.
+  // Always plain contrast AF. Astro AF (15004) lives in the Astro panel behind a
+  // confirmation: if it finds no stars the firmware drops the tele stream until reboot.
   const handleAutoFocus = useCallback(async () => {
     setFocusing(true);
     pingFocusActive();
     try {
-      if (useAstroAf) {
-        await window.api.sdk.focusAstroAutoStart();
-        pushToast('Astro auto-focusing…', 'ok');
-      } else {
-        const reply = (await window.api.sdk.focusAuto()) as { code?: number } | null;
-        const code = reply?.code ?? 0;
-        if (code < 0) pushToast(focusErrorMessage(code), 'err', 3500);
-        else pushToast('Auto-focusing…', 'ok');
-      }
+      const reply = (await window.api.sdk.focusAuto()) as { code?: number } | null;
+      const code = reply?.code ?? 0;
+      if (code < 0) pushToast(focusErrorMessage(code), 'err', 3500);
+      else pushToast('Auto-focusing…', 'ok');
     } catch (e) {
       pushToast(`Auto-focus failed: ${(e as Error).message}`, 'err');
     }
     setTimeout(() => setFocusing(false), 1500);
-  }, [useAstroAf]);
+  }, []);
 
   // Tap-vs-hold are mutually exclusive: tap fires a single step on release if
   // the press was shorter than HOLD_TO_CONTINUOUS_MS, otherwise the press
